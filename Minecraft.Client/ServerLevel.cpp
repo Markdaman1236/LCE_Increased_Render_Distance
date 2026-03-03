@@ -111,7 +111,9 @@ ServerLevel::ServerLevel(MinecraftServer *server, shared_ptr<LevelStorage>levelS
 	addListener(new ServerLevelListener(server, this));
 
 	this->tracker = new EntityTracker(this);
-	this->chunkMap = new PlayerChunkMap(this, dimension, 24);
+	int r = 24;
+	app.DebugPrintf("ChunkMap radius = %d\n", r);
+	this->chunkMap = new PlayerChunkMap(this, dimension, r);
 
 	// This also used to be called in parent ctor, but can't be called until chunkSource is created. Call now if required.
 	if (!levelData->isInitialized())
