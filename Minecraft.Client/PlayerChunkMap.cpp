@@ -476,25 +476,32 @@ bool PlayerChunkMap::hasChunk(int x, int z)
 	return chunks.find(id) != chunks.end();
 }
 
-PlayerChunkMap::PlayerChunk *PlayerChunkMap::getChunk(int x, int z, bool create)
+PlayerChunkMap::PlayerChunk* PlayerChunkMap::getChunk(int x, int z, bool create)
 {
-    __int64 id = (x + 0x7fffffffLL) | ((z + 0x7fffffffLL) << 32);
+	printf("SERVER REQUESTING CHUNK (%d, %d)\n", x, z);
+	fflush(stdout);
+
+	__int64 id = (x + 0x7fffffffLL) | ((z + 0x7fffffffLL) << 32);
 	AUTO_VAR(it, chunks.find(id));
 
-	PlayerChunk *chunk = NULL;
-	if( it != chunks.end() )
+	PlayerChunk* chunk = NULL;
+	if (it != chunks.end())
 	{
 		chunk = it->second;
 	}
-	else if ( create)
+	else if (create)
 	{
-        chunk = new PlayerChunk(x, z, this);
-        chunks[id] = chunk;
+		printf("SERVER CREATING NEW CHUNK (%d, %d)\n", x, z);
+		fflush(stdout);
+
+		chunk = new PlayerChunk(x, z, this);
+		chunks[id] = chunk;
 		knownChunks.push_back(chunk);
-    }
+	}
 
 	return chunk;
 }
+
 
 // 4J - added. If a chunk exists, add a player to it straight away. If it doesn't exist,
 // queue a request for it to be created.
