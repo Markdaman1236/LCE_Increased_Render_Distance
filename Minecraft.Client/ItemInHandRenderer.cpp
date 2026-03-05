@@ -939,4 +939,3 @@ void ItemInHandRenderer::itemUsed()
 {
 	height = 0;
 }
-
