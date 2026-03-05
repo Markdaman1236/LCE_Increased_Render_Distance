@@ -1,3 +1,5 @@
+// Code implemented by LCEMP, credit if used on other repos
+// https://github.com/LCEMP/LCEMP
 #pragma once
 
 #ifdef _WINDOWS64
@@ -5,13 +7,22 @@
 #include <WinSock2.h>
 #include <WS2tcpip.h>
 #include <vector>
+#include <string>
+#include <winhttp.h>
+#pragma comment(lib, "winhttp.lib")
 #include "..\..\Common\Network\NetworkPlayerInterface.h"
 
 #pragma comment(lib, "Ws2_32.lib")
 
+struct HttpResponse {
+	int status;
+	std::string body;
+};
+
 #define WIN64_NET_DEFAULT_PORT 25565
 #define WIN64_NET_MAX_CLIENTS 7
 #define WIN64_NET_RECV_BUFFER_SIZE 65536
+#define WIN64_NET_MAX_PACKET_SIZE (4 * 1024 * 1024)
 #define WIN64_LAN_DISCOVERY_PORT 25566
 #define WIN64_LAN_BROADCAST_MAGIC 0x4D434C4E
 
@@ -62,11 +73,19 @@ public:
 	static bool Initialize();
 	static void Shutdown();
 
-	static bool HostGame(int port);
-	static bool JoinGame(const char *ip, int port);
+	static std::string GetAccessToken() { return s_accessToken; }
+	static std::string GetUserId() { return s_userId; }
 
-	static bool SendToSmallId(BYTE targetSmallId, const void *data, int dataSize);
-	static bool SendOnSocket(SOCKET sock, const void *data, int dataSize);
+	static void SetCustomHostAddress(const std::string& ip, int port);
+
+
+	static bool HostGame(int port, const char* bindIp = NULL);
+	static bool JoinGame(const char* ip, int port);
+
+	static HttpResponse DoWinHttpRequest(const wchar_t* host, int port, const std::wstring& path, const wchar_t* method, const std::string& requestData, const std::vector<std::wstring>& headers);
+
+	static bool SendToSmallId(BYTE targetSmallId, const void* data, int dataSize);
+	static bool SendOnSocket(SOCKET sock, const void* data, int dataSize);
 
 	static bool IsHosting() { return s_isHost; }
 	static bool IsConnected() { return s_connected; }
@@ -77,12 +96,13 @@ public:
 
 	static SOCKET GetSocketForSmallId(BYTE smallId);
 
-	static void HandleDataReceived(BYTE fromSmallId, BYTE toSmallId, unsigned char *data, unsigned int dataSize);
+	static void HandleDataReceived(BYTE fromSmallId, BYTE toSmallId, unsigned char* data, unsigned int dataSize);
 
-	static bool PopDisconnectedSmallId(BYTE *outSmallId);
+	static bool PopDisconnectedSmallId(BYTE* outSmallId);
 	static void PushFreeSmallId(BYTE smallId);
+	static void CloseConnectionBySmallId(BYTE smallId);
 
-	static bool StartAdvertising(int gamePort, const wchar_t *hostName, unsigned int gameSettings, unsigned int texPackId, unsigned char subTexId, unsigned short netVer);
+	static bool StartAdvertising(int gamePort, const wchar_t* hostName, unsigned int gameSettings, unsigned int texPackId, unsigned char subTexId, unsigned short netVer);
 	static void StopAdvertising();
 	static void UpdateAdvertisePlayerCount(BYTE count);
 	static void UpdateAdvertiseJoinable(bool joinable);
@@ -99,6 +119,12 @@ private:
 	static DWORD WINAPI ClientRecvThreadProc(LPVOID param);
 	static DWORD WINAPI AdvertiseThreadProc(LPVOID param);
 	static DWORD WINAPI DiscoveryThreadProc(LPVOID param);
+
+	static std::string s_accessToken;
+	static std::string s_userId;
+
+	static std::string s_customHostIp;
+	static int s_customHostPort;
 
 	static SOCKET s_listenSocket;
 	static SOCKET s_hostConnectionSocket;
@@ -143,5 +169,8 @@ extern bool g_Win64MultiplayerHost;
 extern bool g_Win64MultiplayerJoin;
 extern int g_Win64MultiplayerPort;
 extern char g_Win64MultiplayerIP[256];
+extern bool g_Win64DedicatedServer;
+extern int g_Win64DedicatedServerPort;
+extern char g_Win64DedicatedServerBindIP[256];
 
 #endif

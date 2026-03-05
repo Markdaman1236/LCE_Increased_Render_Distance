@@ -21,6 +21,7 @@
 #include "Windows64\Social\SocialManager.h"
 #include "Windows64\Sentient\DynamicConfigurations.h"
 #include "Windows64\Network\WinsockNetLayer.h"
+#include "Windows64\Windows64_NameXuid.h"
 #elif defined __PSVITA__
 #include "PSVita\Sentient\SentientManager.h"
 #include "StatsCounter.h"
@@ -199,11 +200,10 @@ DWORD IQNetPlayer::GetSendQueueSize(IQNetPlayer * player, DWORD dwFlags) { retur
 DWORD IQNetPlayer::GetCurrentRtt() { return 0; }
 bool IQNetPlayer::IsHost() { return m_isHostPlayer; }
 bool IQNetPlayer::IsGuest() { return false; }
-bool IQNetPlayer::IsLocal() { return true; }
+bool IQNetPlayer::IsLocal() { return !m_isRemote; }
 PlayerUID IQNetPlayer::GetXuid() { return (PlayerUID)(0xe000d45248242f2e + m_smallId); } // todo: restore to INVALID_XUID once saves support this
-extern wstring g_playerName;
-LPCWSTR IQNetPlayer::GetGamertag() { return g_playerName.empty() ? L"Windows" : g_playerName.c_str(); }
-int IQNetPlayer::GetSessionIndex() { return 0; }
+LPCWSTR IQNetPlayer::GetGamertag() { return m_gamertag; }
+int IQNetPlayer::GetSessionIndex() { return m_smallId; }
 bool IQNetPlayer::IsTalking() { return false; }
 bool IQNetPlayer::IsMutedByLocalUser(DWORD dwUserIndex) { return false; }
 bool IQNetPlayer::HasVoice() { return false; }
@@ -232,13 +232,17 @@ void Win64_SetupRemoteQNetPlayer(IQNetPlayer * player, BYTE smallId, bool isHost
 		IQNet::s_playerCount = smallId + 1;
 }
 
+static bool Win64_IsActivePlayer(IQNetPlayer* p, DWORD index);
+
 HRESULT IQNet::AddLocalPlayerByUserIndex(DWORD dwUserIndex) { return S_OK; }
 IQNetPlayer* IQNet::GetHostPlayer() { return &m_player[0]; }
 IQNetPlayer* IQNet::GetLocalPlayerByUserIndex(DWORD dwUserIndex)
 {
 	if (s_isHosting)
 	{
-		if (dwUserIndex < MINECRAFT_NET_MAX_PLAYERS && !m_player[dwUserIndex].m_isRemote)
+		if (dwUserIndex < MINECRAFT_NET_MAX_PLAYERS &&
+			!m_player[dwUserIndex].m_isRemote &&
+			Win64_IsActivePlayer(&m_player[dwUserIndex], dwUserIndex))
 			return &m_player[dwUserIndex];
 		return NULL;
 	}
@@ -246,7 +250,7 @@ IQNetPlayer* IQNet::GetLocalPlayerByUserIndex(DWORD dwUserIndex)
 		return NULL;
 	for (DWORD i = 0; i < s_playerCount; i++)
 	{
-		if (!m_player[i].m_isRemote)
+		if (!m_player[i].m_isRemote && Win64_IsActivePlayer(&m_player[i], i))
 			return &m_player[i];
 	}
 	return NULL;
@@ -282,7 +286,19 @@ IQNetPlayer* IQNet::GetPlayerByXuid(PlayerUID xuid)
 {
 	for (DWORD i = 0; i < s_playerCount; i++)
 	{
-		if (Win64_IsActivePlayer(&m_player[i], i) && m_player[i].GetXuid() == xuid) return &m_player[i];
+		// Conventional XUID implementation except for Windows 64.
+		if (!Win64_IsActivePlayer(&m_player[i], i))
+			continue;
+
+		if (m_player[i].GetXuid() == xuid)
+			return &m_player[i];
+
+		// For Windows 64, NameBase XUID is used.
+#ifdef _WINDOWS64
+		PlayerUID nameXuid = Win64NameXuid::ResolvePersistentXuidFromName(m_player[i].GetGamertag());
+		if (nameXuid == xuid)
+			return &m_player[i];
+#endif
 	}
 	return &m_player[0];
 }
@@ -299,15 +315,28 @@ QNET_STATE IQNet::GetState() { return _iQNetStubState; }
 bool IQNet::IsHost() { return s_isHosting; }
 HRESULT IQNet::JoinGameFromInviteInfo(DWORD dwUserIndex, DWORD dwUserMask, const INVITE_INFO * pInviteInfo) { return S_OK; }
 void IQNet::HostGame() { _iQNetStubState = QNET_STATE_SESSION_STARTING; s_isHosting = true; }
-void IQNet::ClientJoinGame() { _iQNetStubState = QNET_STATE_SESSION_STARTING; s_isHosting = false; }
+void IQNet::ClientJoinGame()
+{
+	_iQNetStubState = QNET_STATE_SESSION_STARTING;
+	s_isHosting = false;
+
+	for (int i = 0; i < MINECRAFT_NET_MAX_PLAYERS; i++)
+	{
+		m_player[i].m_smallId = (BYTE)i;
+		m_player[i].m_isRemote = true;
+		m_player[i].m_isHostPlayer = false;
+		m_player[i].m_gamertag[0] = 0;
+		m_player[i].SetCustomDataValue(0);
+	}
+}
 void IQNet::EndGame()
 {
 	_iQNetStubState = QNET_STATE_IDLE;
 	s_isHosting = false;
 	s_playerCount = 1;
-	for (int i = 1; i < MINECRAFT_NET_MAX_PLAYERS; i++)
+	for (int i = 0; i < MINECRAFT_NET_MAX_PLAYERS; i++)
 	{
-		m_player[i].m_smallId = 0;
+		m_player[i].m_smallId = (BYTE)i;
 		m_player[i].m_isRemote = false;
 		m_player[i].m_isHostPlayer = false;
 		m_player[i].m_gamertag[0] = 0;
@@ -587,23 +616,9 @@ void				C_4JProfile::SetPrimaryPad(int iPad) {}
 #ifdef _DURANGO
 char fakeGamerTag[32] = "PlayerName";
 void				SetFakeGamertag(char* name) { strcpy_s(fakeGamerTag, name); }
-char* C_4JProfile::GetGamertag(int iPad) { return fakeGamerTag; }
 #else
-#include <windows.h>
-
-const char* C_4JProfile::GetGamertag(int iPad)
-{
-	static std::string narrowName;
-	const wchar_t* wideName = g_playerName.c_str();
-
-	int sizeNeeded = WideCharToMultiByte(CP_UTF8, 0, wideName, -1, nullptr, 0, nullptr, nullptr);
-
-	narrowName.resize(sizeNeeded);
-	WideCharToMultiByte(CP_UTF8, 0, wideName, -1, &narrowName[0], sizeNeeded, nullptr, nullptr);
-
-	return narrowName.c_str();
-}
-wstring				C_4JProfile::GetDisplayName(int iPad) { return g_playerName; }
+char* C_4JProfile::GetGamertag(int iPad) { extern char g_Win64Username[17]; return g_Win64Username; }
+wstring				C_4JProfile::GetDisplayName(int iPad) { extern wchar_t g_Win64UsernameW[17]; return g_Win64UsernameW; }
 #endif
 bool				C_4JProfile::IsFullVersion() { return s_bProfileIsFullVersion; }
 void				C_4JProfile::SetSignInChangeCallback(void (*Func)(LPVOID, bool, unsigned int), LPVOID lpParam) {}

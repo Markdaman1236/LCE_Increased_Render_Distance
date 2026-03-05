@@ -220,27 +220,47 @@ void CPlatformNetworkManagerStub::DoWork()
 		if (m_pIQNet->IsHost())
 			WinsockNetLayer::UpdateAdvertiseJoinable(true);
 	}
-	if (_iQNetStubState == QNET_STATE_IDLE)
-		TickSearch();
-	if (_iQNetStubState == QNET_STATE_GAME_PLAY && m_pIQNet->IsHost())
+	// Keep LAN search ticking whenever the join menu callback is active, even if QNet state
+	// is not idle due to prior connection attempts.
+	TickSearch();
+	if (m_pIQNet->IsHost())
 	{
 		BYTE disconnectedSmallId;
 		while (WinsockNetLayer::PopDisconnectedSmallId(&disconnectedSmallId))
 		{
-			IQNetPlayer* qnetPlayer = m_pIQNet->GetPlayerBySmallId(disconnectedSmallId);
-			if (qnetPlayer != NULL && qnetPlayer->m_smallId == disconnectedSmallId)
+			if (disconnectedSmallId == 0 || disconnectedSmallId >= MINECRAFT_NET_MAX_PLAYERS)
+				continue;
+
+			app.DebugPrintf("Win64 LAN: Processing disconnected smallId=%d\n", disconnectedSmallId);
+
+			IQNetPlayer* qnetPlayer = &IQNet::m_player[disconnectedSmallId];
+			if (qnetPlayer->m_smallId == disconnectedSmallId)
 			{
-				NotifyPlayerLeaving(qnetPlayer);
+				if (qnetPlayer->GetCustomDataValue() != 0)
+				{
+					NotifyPlayerLeaving(qnetPlayer);
+				}
+				else
+				{
+					app.DebugPrintf("Win64 LAN: smallId=%d had no active network player object\n", disconnectedSmallId);
+				}
 				qnetPlayer->m_smallId = 0;
 				qnetPlayer->m_isRemote = false;
 				qnetPlayer->m_isHostPlayer = false;
 				qnetPlayer->m_gamertag[0] = 0;
 				qnetPlayer->SetCustomDataValue(0);
-				WinsockNetLayer::PushFreeSmallId(disconnectedSmallId);
-				if (IQNet::s_playerCount > 1)
-					IQNet::s_playerCount--;
 			}
+			WinsockNetLayer::PushFreeSmallId(disconnectedSmallId);
 		}
+
+		// Keep player-count in sync with active remote slots.
+		DWORD highestUsedIndex = 0;
+		for (DWORD i = 1; i < MINECRAFT_NET_MAX_PLAYERS; i++)
+		{
+			if (IQNet::m_player[i].GetCustomDataValue() != 0)
+				highestUsedIndex = i;
+		}
+		IQNet::s_playerCount = highestUsedIndex + 1;
 	}
 #endif
 }
@@ -362,12 +382,23 @@ void CPlatformNetworkManagerStub::HostGame(int localUsersMask, bool bOnlineGame,
 
 #ifdef _WINDOWS64
 	int port = WIN64_NET_DEFAULT_PORT;
+	const char* bindIp = NULL;
+	if (g_Win64DedicatedServer)
+	{
+		if (g_Win64DedicatedServerPort > 0)
+			port = g_Win64DedicatedServerPort;
+		if (g_Win64DedicatedServerBindIP[0] != 0)
+			bindIp = g_Win64DedicatedServerBindIP;
+	}
 	if (!WinsockNetLayer::IsActive())
-		WinsockNetLayer::HostGame(port);
+		WinsockNetLayer::HostGame(port, bindIp);
 
-	const wchar_t* hostName = IQNet::m_player[0].m_gamertag;
-	unsigned int settings = app.GetGameHostOption(eGameHostOption_All);
-	WinsockNetLayer::StartAdvertising(port, hostName, settings, 0, 0, MINECRAFT_NET_VERSION);
+	if (WinsockNetLayer::IsActive())
+	{
+		const wchar_t* hostName = IQNet::m_player[0].m_gamertag;
+		unsigned int settings = app.GetGameHostOption(eGameHostOption_All);
+		WinsockNetLayer::StartAdvertising(port, hostName, settings, 0, 0, MINECRAFT_NET_VERSION);
+	}
 #endif
 //#endif
 }
@@ -641,6 +672,19 @@ bool CPlatformNetworkManagerStub::SystemFlagGet(INetworkPlayer *pNetworkPlayer, 
 		}
 	}
 	return false;
+}
+
+void CPlatformNetworkManagerStub::SystemFlagClearForSystem(INetworkPlayer* pNetworkPlayer)
+{
+	if (pNetworkPlayer == NULL) return;
+
+	for (unsigned int i = 0; i < m_playerFlags.size(); i++)
+	{
+		if (pNetworkPlayer->IsSameSystem(m_playerFlags[i]->m_pNetworkPlayer))
+		{
+			memset(m_playerFlags[i]->flags, 0, m_playerFlags[i]->count / 8);
+		}
+	}
 }
 
 wstring CPlatformNetworkManagerStub::GatherStats()
