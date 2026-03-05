@@ -280,11 +280,12 @@ static BOOL WINAPI HeadlessServerCtrlHandler(DWORD ctrlType)
 static void SetupHeadlessServerConsole()
 {
 	// Console is already inherited via /SUBSYSTEM:CONSOLE.
-	// Just retitle it and register the Ctrl handler.
+	// Disable buffering so output appears immediately in terminals and Docker logs.
+	setvbuf(stdout, NULL, _IONBF, 0);
+	setvbuf(stderr, NULL, _IONBF, 0);
 	SetConsoleTitleA("Minecraft Server");
 	SetConsoleCtrlHandler(HeadlessServerCtrlHandler, TRUE);
 }
-
 void DefineActions(void)
 {
 	// The app needs to define the actions required, and the possible mappings for these
@@ -1231,7 +1232,22 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 		return FALSE;
 	}
 
-	hMyInst=hInstance;
+    hMyInst = hInstance;
+
+	// Server mode: skip window creation and D3D entirely.
+	// Both will fail in headless/Wine environments and are not needed.
+	if (launchOptions.serverMode)
+	{
+		return RunHeadlessServer();
+	}
+
+	// Client mode only from here down
+	MyRegisterClass(hInstance);
+
+	if (!InitInstance(hInstance, nCmdShow))
+	{
+		return FALSE;
+	}
 
 	if( FAILED( InitDevice() ) )
 	{
@@ -1243,13 +1259,6 @@ int APIENTRY _tWinMain(_In_ HINSTANCE hInstance,
 	if (LoadFullscreenOption() && !g_isFullscreen)
 	{
 		ToggleFullscreen();
-	}
-
-	if (launchOptions.serverMode)
-	{
-		int serverResult = RunHeadlessServer();
-		CleanupDevice();
-		return serverResult;
 	}
 
 #if 0
