@@ -478,9 +478,6 @@ bool PlayerChunkMap::hasChunk(int x, int z)
 
 PlayerChunkMap::PlayerChunk* PlayerChunkMap::getChunk(int x, int z, bool create)
 {
-	printf("SERVER REQUESTING CHUNK (%d, %d)\n", x, z);
-	fflush(stdout);
-
 	__int64 id = (x + 0x7fffffffLL) | ((z + 0x7fffffffLL) << 32);
 	AUTO_VAR(it, chunks.find(id));
 
@@ -491,9 +488,6 @@ PlayerChunkMap::PlayerChunk* PlayerChunkMap::getChunk(int x, int z, bool create)
 	}
 	else if (create)
 	{
-		printf("SERVER CREATING NEW CHUNK (%d, %d)\n", x, z);
-		fflush(stdout);
-
 		chunk = new PlayerChunk(x, z, this);
 		chunks[id] = chunk;
 		knownChunks.push_back(chunk);
