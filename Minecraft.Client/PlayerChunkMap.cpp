@@ -832,7 +832,7 @@ bool PlayerChunkMap::isPlayerIn(shared_ptr<ServerPlayer> player, int xChunk, int
 
 int PlayerChunkMap::convertChunkRangeToBlock(int radius)
 {
-	return radius * 16 - 16;
+	return radius * 24 - 16;
 }
 
 // AP added for Vita so the range can be increased once the level starts
